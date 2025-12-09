@@ -1,9 +1,10 @@
+import os
 import streamlit as st
 
 from src.config.settings import APP_NAME, PDF_DIR
 from src.loaders.pdf_loader import load_pdfs
 from src.splitter.text_splitter import split_docs
-from src.vectorstore.chroma_store import load_or_create_vectorstore
+from src.vectorstore.chroma_store import load_or_update_vectorstore
 from src.retriever.get_retriever import get_similarity_retriever, get_mmr_retriever
 from src.llm.ollama_llm import get_llm
 from src.memory.chat_memory import get_memory
@@ -18,7 +19,7 @@ from src.utils.helpers import extract_sources
 def get_docs_and_vectorstore():
     docs = load_pdfs(PDF_DIR)
     splits = split_docs(docs)
-    vectorstore = load_or_create_vectorstore(splits)
+    vectorstore = load_or_update_vectorstore()
     return docs, splits, vectorstore
 
 
@@ -56,6 +57,38 @@ def main():
     # Sidebar
     with st.sidebar:
         st.subheader("Settings")
+
+        # -------- NEW: PDF upload + save to local data/pdfs --------
+        st.markdown("**Upload research PDFs**")
+        os.makedirs(PDF_DIR, exist_ok=True)
+
+        uploaded_files = st.file_uploader(
+            "Add PDFs to your local knowledge base",
+            type=["pdf"],
+            accept_multiple_files=True,
+            label_visibility="collapsed",
+        )
+        if uploaded_files:
+            os.makedirs(PDF_DIR, exist_ok=True)
+            saved_names = []
+            for f in uploaded_files:
+                save_path = os.path.join(PDF_DIR, f.name)
+                with open(save_path, "wb") as out:
+                    out.write(f.read())
+                saved_names.append(f.name)
+
+            # Clear caches so Streamlit recomputes with new PDFs
+            get_docs_and_vectorstore.clear()
+            get_retrievers.clear()
+
+            # Immediately index new PDFs into Chroma
+            with st.spinner("Indexing new PDFs into vector store..."):
+                # this will call load_or_update_vectorstore inside
+                get_docs_and_vectorstore()
+
+            st.success(f"Saved and indexed {len(saved_names)} PDF(s) to {PDF_DIR}")
+            st.write("New PDFs are now included in retrieval.")
+        # -----------------------------------------------------------
 
         st.write("**PDF directory:**")
         st.code(PDF_DIR, language="bash")
